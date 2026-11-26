@@ -19,9 +19,25 @@ DB = os.getenv('RADAR_DB', str(ROOT / 'radar.sqlite3'))
 BOARDS = [('Greenhouse', 'stripe', 'Stripe'), ('Greenhouse', 'discord', 'Discord'),
           ('Ashby', 'ramp', 'Ramp'), ('Lever', 'palantir', 'Palantir'),
           ('Lever', 'gopuff', 'Gopuff'), ('Greenhouse', 'perpay', 'Perpay'),
-          ('Greenhouse', 'healthverity', 'HealthVerity')]
-DEFAULT = dict(any='Software Engineer, Software Developer, Junior Developer, Application Developer, Technology Associate, Technology Analyst, Tech Delivery Analyst, Technology Consultant, Technology Rotational, IT Project Coordinator, Technical Project Analyst, Business Analyst, Business Systems Analyst',
+          ('Greenhouse', 'healthverity', 'HealthVerity'),
+          ('Lever', 'freedompay', 'FreedomPay'), ('Lever', 'veeva', 'Veeva Systems'),
+          ('Greenhouse', 'trellahealth', 'Trella Health'), ('Greenhouse', 'fortrobotics', 'FORT Robotics'),
+          ('Greenhouse', 'datasystemsanalystsinc', 'Data Systems Analysts')]
+GRAD_PRESET = dict(any='Software Engineer, Software Developer, Junior Developer, Application Developer, Technology Associate, Technology Analyst, Tech Delivery Analyst, Technology Consultant, Technology Rotational, IT Project Coordinator, Technical Project Analyst, Business Analyst, Business Systems Analyst',
                exclude='internship, senior, staff engineer, principal', location='Philadelphia, PA', scope='25', work=[], date='any', unknown_date=True, experience=['New Grad','Entry Level','Associate','Unspecified'], employment=['Full-time','Unspecified'], max_years='2', start='Spring/Summer 2027', unknown_start=True, grad='2027-05', unknown_grad=True, sort='Best Match', state='PA')
+ROLE_PATTERNS = {
+    'Software Engineering': r'\b(?:software|web|application|app|mobile|backend|back.end|frontend|front.end|full.stack|platform|systems|integration|embedded|firmware|api|java|python|javascript|android|ios|react|\.net)\b.*\b(?:engineer(?:ing)?|developer|development|programmer|architect|intern(?:ship)?)\b|\b(?:developer|programmer|software engineer)\b',
+    'Data and AI': r'\b(?:data|database|analytics|business intelligence|machine learning|artificial intelligence|ai|ml|reporting)\b.*\b(?:analyst|engineer(?:ing)?|scientist|developer|specialist|architect|consultant|administrator|manager|intern(?:ship)?)\b|\bdata science\b',
+    'IT and Cybersecurity': r'\b(?:information technology|it|tech(?:nical)? support|help desk|service desk|cloud|devops|devsecops|cyber(?:security)?|information security|security operations|site reliability|network|system[s]?)\b.*\b(?:engineer|analyst|specialist|administrator|associate|technician|consultant|support|coordinator)\b|\b(?:sysadmin|devops|cybersecurity|penetration tester)\b',
+    'Technology Consulting': r'\b(?:tech(?:nology|nical)?|digital|solutions|implementation|it|erp|software|salesforce|sap|servicenow|workday)\b.*\b(?:consultant|consulting|analyst|associate|specialist|rotational|advisory|engineer)\b|\b(?:implementation|solutions|functional)\s+consultant\b',
+    'Business Analysis and Project Management': r'\b(?:business|systems|process|product|project|program|delivery|requirements|operations|scrum)\b.*\b(?:analyst|manager|coordinator|associate|specialist|owner|master|management|intern(?:ship)?)\b|\b(?:pmo|business analysis)\b',
+    'QA and Testing': r'\b(?:qa|quality assurance|software quality|test automation|software test|sdet|quality engineering)\b|\btest\s+(?:engineer|developer|analyst)\b',
+}
+ROLE_QUERIES = ('software developer', 'data analyst', 'IT support', 'technology consultant',
+                'business analyst', 'quality assurance engineer')
+DEFAULT = dict(roles=list(ROLE_PATTERNS), location='Philadelphia, PA', scope='50',
+               national_remote=True, state='PA', unknown_date=True, date='any', sort='Best Match')
+PAGE_SIZE = 50
 SKILLS = ['Python','Java','JavaScript','SQL','Git','Power BI','automation','project coordination']
 HOSTS = {'job-boards.greenhouse.io':'Greenhouse','boards.greenhouse.io':'Greenhouse',
          'jobs.lever.co':'Lever','jobs.ashbyhq.com':'Ashby'}
@@ -37,7 +53,7 @@ def db():
     CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, data TEXT NOT NULL);
     """)
     if not conn.execute("SELECT 1 FROM kv WHERE key='searches'").fetchone():
-        conn.execute('INSERT OR IGNORE INTO kv VALUES (?,?)', ('searches',json.dumps({'My May 2027 search':{'filters':DEFAULT}})))
+        conn.execute('INSERT OR IGNORE INTO kv VALUES (?,?)', ('searches',json.dumps({'My May 2027 search':{'filters':GRAD_PRESET}})))
     conn.commit()
     return conn
 
@@ -116,7 +132,7 @@ def normalize(source, company, title, location, description, link, **extra):
         elif re.search(r'requires?|required|minimum|at least|must have|qualifications|requirements',context):
             years.append(int(match[1]))
     level='Unspecified'
-    for label,pattern in [('Senior',r'\b(senior|sr\.?|staff|principal|director)\b'),('New Grad',r'new grad|university grad|early career'),('Entry Level',r'entry.level|\bjunior\b|\bi$'),('Associate',r'\bassociate\b'),('Mid-Level',r'mid.level|\bii\b')]:
+    for label,pattern in [('Senior',r'\b(senior|sr\.?|staff|principal|director)\b'),('New Grad',r'\b(?:new|recent|university|college)[ -]+grad(?:uate)?s?\b|\bgraduate\s+(?:program|scheme|engineer|developer|trainee|analyst)\b|\b(?:early career|campus hire|campus recruiting|university hire)\b'),('Entry Level',r'entry.level|\bjunior\b|\bi$'),('Associate',r'\bassociate\b'),('Mid-Level',r'mid.level|\bii\b')]:
         if re.search(pattern,title,re.I):
             level=label
             break
@@ -149,6 +165,8 @@ def normalize(source, company, title, location, description, link, **extra):
                 date=None
         if date:
             extra['expires_at']=date.date().isoformat()
+    if level=='Unspecified' and re.search(r'\b(?:open to|designed for|ideal for|targeted at)\s+(?:new|recent)\s+graduates\b',lower):
+        level='New Grad'
     posted=extra.pop('posted_at',None)
     return dict(source=source, company=clean(company), title=clean(title), location=clean(location),
         description=body, link=link if canonical(link) else '', work=work, experience=level, required=max(years,default=None),
@@ -191,7 +209,7 @@ def terms(value):
 
 def adzuna(filters):
     found=[]
-    keywords=terms(filters.get('any'))[:4] or ['']
+    keywords=terms(filters.get('any'))[:6] or (list(ROLE_QUERIES) if filters.get('roles') else [''])
     places=[''] if filters.get('scope')=='nationwide' else (locations(filters) or [''])
     for place in places[:3]:
         for keyword in keywords:
@@ -210,9 +228,10 @@ def adzuna(filters):
 
 def discovery(filters):
     boards={}
-    for keyword in terms(filters.get('any'))[:3] or ['software engineer','technology analyst']:
+    career='new graduate' if filters.get('experience')==['New Grad'] else ''
+    for keyword in terms(filters.get('any'))[:6] or ROLE_QUERIES:
         place='' if filters.get('scope')=='nationwide' else ' '.join(locations(filters)[:2])
-        query=f'"{keyword}" {place} {" ".join(filters.get("work",[]))} early career (site:job-boards.greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com)'
+        query=f'"{keyword}" {place} {" ".join(filters.get("work",[]))} {career} (site:job-boards.greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com)'
         result=fetch('https://api.search.brave.com/res/v1/web/search',{'q':query,'count':15},{'X-Subscription-Token':os.environ['BRAVE_SEARCH_API_KEY']})
         for hit in result.get('web',{}).get('results',[]):
             try:
@@ -300,6 +319,8 @@ def matches(job,f,clock=None):
     clock=clock or dt.datetime.now(dt.timezone.utc)
     title=job['title'].lower()
     content=title+' '+job['description'].lower() if f.get('descriptions') else title
+    roles=f.get('roles') or []
+    if roles and not any(re.search(pattern,title) for role,pattern in ROLE_PATTERNS.items() if role in roles): return False
     if terms(f.get('any')) and not any(x in content for x in terms(f['any'])): return False
     if any(x not in content for x in terms(f.get('must'))) or any(x in content for x in terms(f.get('exclude'))): return False
     for key,value in [('work',job['work']),('experience',job['experience']),('employment',employment(job))]:
@@ -422,7 +443,7 @@ def snapshot(conn):
     statuses['Adzuna']={'state':'configured' if os.getenv('ADZUNA_APP_ID') and os.getenv('ADZUNA_APP_KEY') else 'awaiting credentials'}
     statuses['Brave Search']={'state':'configured' if os.getenv('BRAVE_SEARCH_API_KEY') else 'awaiting credentials'}
     statuses.update({name:status for name,status in get(conn,'sources',{}).items() if name in statuses})
-    return dict(default=DEFAULT, searches=searches, tracking=tracking, tracked_jobs=jobs, sources=statuses, boards=boards)
+    return dict(default=DEFAULT, roles=list(ROLE_PATTERNS), searches=searches, tracking=tracking, tracked_jobs=jobs, sources=statuses, boards=boards)
 
 class Handler(BaseHTTPRequestHandler):
     def reply(self,value,status=200):
@@ -492,7 +513,11 @@ class Handler(BaseHTTPRequestHandler):
                     put(conn,'searches',searches)
                 selected=results(conn,filters)
                 total=conn.execute('SELECT count(*) FROM jobs').fetchone()[0]
-                self.reply(dict(jobs=selected[:250],count=len(selected),total=total,**snapshot(conn)))
+                page_count=max(1,(len(selected)+PAGE_SIZE-1)//PAGE_SIZE)
+                page=min(page_count,max(1,int(body.get('page',1))))
+                start=(page-1)*PAGE_SIZE
+                self.reply(dict(jobs=selected[start:start+PAGE_SIZE],count=len(selected),total=total,
+                                page=page,page_count=page_count,**snapshot(conn)))
             return
         with closing(db()) as conn,conn:
             conn.execute('BEGIN IMMEDIATE')

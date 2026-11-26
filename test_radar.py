@@ -25,6 +25,18 @@ class SearchTest(unittest.TestCase):
         self.filters = dict(location='Philadelphia, PA', scope='25', work=['Hybrid'],
                             employment=['Full-time'], date='7d', unknown_date=False, max_years='2')
 
+    def test_broad_default_and_new_grad_filter(self):
+        for title in ('Software Engineer III', 'Software Engineering Internship', 'Data Analyst', 'IT Support Specialist',
+                      'Implementation Consultant', 'Business Systems Analyst', 'QA Engineer'):
+            with self.subTest(title=title):
+                self.assertTrue(radar.matches(job(title=title),radar.DEFAULT,self.clock))
+        self.assertFalse(radar.matches(job(title='Restaurant Server'),radar.DEFAULT,self.clock))
+        self.assertTrue(radar.matches(job(title='Software Developer',location='United States',
+                                          workplace='Remote'),radar.DEFAULT,self.clock))
+        new_grad=dict(radar.DEFAULT,experience=['New Grad'])
+        self.assertTrue(radar.matches(job(title='Software Engineer, New Graduate'),new_grad,self.clock))
+        self.assertFalse(radar.matches(job(title='Senior Software Engineer'),new_grad,self.clock))
+
     def test_combined_filters(self):
         self.assertTrue(radar.matches(job(posted_at='2026-11-25'),self.filters,self.clock))
         for variant in (job(),job(posted_at='2026-11-10'),job(posted_at='2026-11-25',workplace='Remote'),
@@ -72,10 +84,10 @@ class SearchTest(unittest.TestCase):
         def publisher(board):
             if board[1]=='broken':
                 raise RuntimeError('HTTP 503')
-            return [job()]
+            return [job(),job(req='102',link='https://jobs.ashbyhq.com/example/second')]
         with tempfile.TemporaryDirectory() as tmp, patch.object(radar,'DB',tmp+'/test.sqlite3'), \
              patch.object(radar,'BOARDS',[('Ashby','example','Example'),('Ashby','broken','Broken')]), \
-             patch.object(radar,'employer',side_effect=publisher):
+             patch.object(radar,'employer',side_effect=publisher), patch.object(radar,'PAGE_SIZE',1):
             with radar.ThreadingHTTPServer(('127.0.0.1',0),radar.Handler) as server:
                 t=threading.Thread(target=server.serve_forever,daemon=True)
                 t.start()
@@ -91,7 +103,11 @@ class SearchTest(unittest.TestCase):
                     call('saved-search',dict(name='Hybrid',filters=f))
                     call('saved-search',dict(name='Remote',filters=other))
                     answer=call('search',dict(filters=f,name='Hybrid'))
-                    self.assertEqual(answer['count'],1)
+                    self.assertEqual(answer['count'],2)
+                    self.assertEqual(answer['page_count'],2)
+                    second=call('filter',dict(filters=f,page=2))
+                    self.assertEqual(second['page'],2)
+                    self.assertNotEqual(second['jobs'][0]['id'],answer['jobs'][0]['id'])
                     self.assertEqual(answer['sources']['Ashby · Broken']['state'],'unavailable')
                     jid=answer['jobs'][0]['id']
                     call('track',dict(id=jid,saved=True,status='Applied',date='2026-11-26',notes='Follow up'))

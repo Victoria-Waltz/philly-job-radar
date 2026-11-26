@@ -10,11 +10,12 @@ const field = (name,label,type='text',placeholder='') => `<label class="field">$
 const select = (name,label,values) => `<label class="field">${label}<select name="${name}">${options(values)}</select></label>`;
 const toggle = (name,label) => `<label class="toggle"><input name="${name}" type="checkbox">${label}</label>`;
 const group = (name,label,values) => `<fieldset><legend>${label}</legend>${values.map(v=>`<label><input type="checkbox" name="${name}" value="${esc(v)}">${esc(v)}</label>`).join('')}</fieldset>`;
-const groups = ['work','experience','employment'];
+const groups = ['work','experience','employment','roles'];
 $('#basic').innerHTML = group('work','Work arrangement',['Remote','Hybrid','On-site','Unspecified'])
   + select('date','Date posted',[['any','Any time'],['1h','Past hour'],['24h','Past 24 hours'],['3d','Past 3 days'],['7d','Past 7 days'],['30d','Past month'],['custom','Custom range']])
   + '<div id="date-range" hidden>'+field('date_start','From','date')+field('date_end','Through','date')+'</div>'
   + toggle('unknown_date','Include unknown posting dates')
+  + '<div id="role-filters"></div>'
   + group('experience','Experience',['New Grad','Entry Level','Associate','Mid-Level','Senior','Unspecified'])
   + group('employment','Employment',['Full-time','Part-time','Internship','Contract','Temporary','Unspecified'])
   + field('start','Start month, season or year','text','June 2027')+toggle('unknown_start','Include unspecified start dates');
@@ -68,6 +69,7 @@ function chips() {
   const f = filters();
   $('#date-range').hidden = f.date !== 'custom';
   const values = Object.entries(f).flatMap(([k,v]) => {
+    if (k==='roles' && v.length===state.roles?.length) return [];
     if (groups.includes(k)) return v.map(item=>[k,item,item]);
     if (['sort','any'].includes(k)||!v||v==='any'||v==='25'||k.startsWith('unknown_')) return [];
     const input = form.elements[k];
@@ -112,7 +114,7 @@ function tracker(job, record, mode) {
 function card(job, mode='search') {
   const record = state.tracking?.[job.id] || {};
   const place = [job.location||'Location unspecified',job.distance!=null?`${Math.round(job.distance)} mi`:''].filter(Boolean).join(' · ');
-  const details = [job.experience==='Unspecified'?'Experience unspecified':job.experience+' (title-based)',job.employment!=='Unspecified'?job.employment:'',
+  const details = [job.experience==='Unspecified'?'Experience unspecified':job.experience+' (inferred)',job.employment!=='Unspecified'?job.employment:'',
     job.required!=null?job.required+' years required':'',job.preferred!=null?job.preferred+' years preferred':'',job.start||'Start date unspecified',job.salary].filter(Boolean).join(' · ');
   const original = link(job.link);
   const apply = link(job.apply || job.link);
@@ -143,8 +145,12 @@ function render() {
   $('#notice').textContent = loading ? 'Refreshing sources. Previous results stay visible while the search runs.' : hasRun
     ? `${state.total ?? '—'} unique listings in the index · ${searched} sources searched${failed||pending?` · Partial coverage (${failed} unavailable, ${pending} awaiting credentials)`:''}`
     : 'Run a live search to load employer postings.';
-  $('#cards').innerHTML = jobs.length ? jobs.map(job=>card(job)).join('')+(state.count>jobs.length?empty('Showing the first 250 matches. Refine the filters for a shorter list.'):'')
+  $('#cards').innerHTML = jobs.length ? jobs.map(job=>card(job)).join('')
     : empty(hasRun?'No listings match these filters.':'Your matches will appear here after a live search.');
+  $('#pagination').hidden = (state.page_count ?? 1) <= 1;
+  $('#previous-page').disabled = loading || state.page <= 1;
+  $('#next-page').disabled = loading || state.page >= state.page_count;
+  $('#page-label').textContent = `Page ${state.page ?? 1} of ${state.page_count ?? 1}`;
   $('#search-list').innerHTML = Object.entries(state.searches || {}).map(([name,item]) => `<article class="panel"><h3>${esc(name)}</h3>
     <p class="meta">${esc([item.filters.location,item.filters.scope==='nationwide'?'Nationwide':item.filters.scope,item.filters.work?.join(', '),item.filters.any].filter(Boolean).join(' · '))}</p>
     <p class="meta">${item.new} new matches · ${item.last_refresh?'Last refreshed '+displayDate(item.last_refresh):'Awaiting first refresh'}</p>
@@ -154,12 +160,12 @@ function render() {
   $('#application-list').innerHTML = tracked.filter(j=>state.tracking[j.id].status).map(j=>card(j,'applications')).join('')||empty('Track an application from a saved job or its details.');
   for (const element of all('[data-track] select')) element.value = state.tracking[element.form.dataset.track].status;
 }
-async function search(live=false,view=false) {
+async function search(live=false,view=false,page=1) {
   if (live && loading) return;
   const token = ++sequence;
   if (live) {loading=true;render();}
   try {
-    const value = await api(live?'search':'filter',{filters:filters(),name:activeName,view});
+    const value = await api(live?'search':'filter',{filters:filters(),name:activeName,view,page});
     if (token===sequence) {
       state={...state,...value};
       jobs=value.jobs;
@@ -224,6 +230,13 @@ document.addEventListener('keydown',event=>{
   }
 });
 $('#clear').onclick=()=>{applyFilters({date:'any',scope:'25',sort:'Best Match',unknown_date:true});changed();};
+$('#reset-search').onclick=()=>{applyFilters(state.default);changed();};
+for (const [id,step] of [['previous-page',-1],['next-page',1]]) {
+  $('#'+id).onclick=async()=>{
+    await search(false,false,state.page+step);
+    $('#count').scrollIntoView({block:'center'});
+  };
+}
 $('#save-search').onclick=()=>dialog('Save this search',`<form id="name-form">${field('name','Search name','text','Philly Hybrid Software')}<button class="primary">Save search</button></form>`);
 document.addEventListener('click',async event=>{
   const button=event.target.closest('button');
@@ -286,8 +299,8 @@ document.addEventListener('submit',async event=>{
 (async()=>{
   try {
     state=await api('state');
-    activeName=state.searches['My May 2027 search']?'My May 2027 search':'';
-    applyFilters(state.searches[activeName]?.filters||state.default);
+    $('#role-filters').innerHTML=group('roles','Career field',state.roles);
+    applyFilters(state.default);
     await search();
   } catch(error){toast(error.message);}
   finally { form.inert = false; }

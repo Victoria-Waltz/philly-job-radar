@@ -10,13 +10,13 @@ Requires Python 3.10+ and outbound HTTPS. There are no packages to install.
 python radar.py
 ```
 
-Open http://127.0.0.1:8000 and select **Search live jobs**. On Windows, use `py radar.py` if Python is installed through the Windows launcher. The first refresh may take several seconds. Remove filters to inspect more of the live index. Separate phrases by commas and locations by semicolons (for example, `Philadelphia, PA; Wilmington, DE`).
+Open http://127.0.0.1:8000 and select **Search live jobs**. On Windows, use `py radar.py` if Python is installed through the Windows launcher. The first refresh may take several seconds. The default search includes software engineering, data and AI, IT and cybersecurity, technology consulting, business analysis and project management, and QA. It starts within 50 miles of Philadelphia and includes eligible nationwide remote listings. Every experience and employment level is included by default. Select **New Grad**, **Entry Level**, or another filter to narrow the results. **My career fields** restores this starting view. Use **Next** to browse through all matches from the available sources. Separate phrases by commas and locations by semicolons (for example, `Philadelphia, PA; Wilmington, DE`).
 
 The server creates `radar.sqlite3` alongside the code. Use `RADAR_DB` to choose a different persistent SQLite path and `PORT` to change the port. The app binds to loopback by default. For a phone on the same trusted network, set `RADAR_HOST=0.0.0.0` and open the computer's LAN address and port on the phone. This single-user server has no authentication.
 
 ## Sources
 
-- Key-free public ATS feeds ship for Stripe, Discord, Perpay and HealthVerity (Greenhouse), Ramp (Ashby), and Palantir and Gopuff (Lever).
+- Key-free public ATS feeds ship for Stripe, Discord, Perpay and HealthVerity (Greenhouse), Ramp (Ashby), and Palantir and Gopuff (Lever). Philadelphia-area feeds also include FreedomPay, Veeva Systems, Trella Health, FORT Robotics, and Data Systems Analysts. Results cover the configured sources and are limited by what those sources return.
 - Use **Manage sources** to add a public Greenhouse, Ashby or Lever board URL. Custom careers sites and other ATS systems need their own adapters.
 - Set both `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` before starting the server to enable Adzuna's US search API. Results with an Adzuna redirect use the provider link.
 - Set `BRAVE_SEARCH_API_KEY` before starting the server to enable targeted Brave searches. The integration uses supported ATS hosts and verifies discovered URLs against the live job feed. It does not convert snippets into job records.
