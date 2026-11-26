@@ -5,3 +5,6 @@
 
 #pagination[hidden]{display:none}
 #pagination{align-items:center;justify-content:center;margin:1rem 0}
+
+#web-discovery[hidden]{display:none}
+#web-links li{margin:.45rem 0;overflow-wrap:anywhere}

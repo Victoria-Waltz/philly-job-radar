@@ -147,6 +147,12 @@ function render() {
     : 'Run a live search to load employer postings.';
   $('#cards').innerHTML = jobs.length ? jobs.map(job=>card(job)).join('')
     : empty(hasRun?'No listings match these filters.':'Your matches will appear here after a live search.');
+  const webLinks=state.sources?.['Brave Search']?.web_links || [];
+  $('#web-discovery').hidden = !webLinks.length;
+  $('#web-links').innerHTML = webLinks.map(hit=>{
+    const href=link(hit.url);
+    return href ? `<li><a href="${href}" target="_blank" rel="noopener noreferrer">${esc(hit.title)}</a> · ${esc(hit.domain)}</li>` : '';
+  }).join('');
   $('#pagination').hidden = (state.page_count ?? 1) <= 1;
   $('#previous-page').disabled = loading || state.page <= 1;
   $('#next-page').disabled = loading || state.page >= state.page_count;
@@ -189,7 +195,7 @@ function dialog(title, content) {
 }
 function sourceDialog() {
   const sources=Object.entries(state.sources || {});
-  dialog('Search sources',`<p class="meta">Public employer boards work without keys. Set ADZUNA_APP_ID, ADZUNA_APP_KEY and BRAVE_SEARCH_API_KEY on the server to expand coverage.</p>
+  dialog('Search sources',`<p class="meta">Remotive and public employer boards work without keys. Set ADZUNA_APP_ID and ADZUNA_APP_KEY for broader listings, BRAVE_SEARCH_API_KEY for public web discoveries, or USAJOBS_EMAIL and USAJOBS_API_KEY for federal jobs.</p>
   ${sources.length?sources.map(([name,s])=>`<div class="source-row"><strong>${esc(name)}</strong> · ${esc(s.state)}${s.count!=null?' · '+s.count+' listings':''}${s.last_success?' · Last success '+esc(new Date(s.last_success).toLocaleString()):''}${s.detail?' · '+esc(s.detail):''}</div>`).join(''):'<p>Employer boards are configured. Run a search to see their status.</p>'}
   <h3>Add an employer board</h3><form id="board-form">${field('url','Greenhouse, Lever or Ashby URL','url','https://jobs.ashbyhq.com/company')}${field('name','Employer name')}<button class="primary">Add board</button></form>
   ${(state.boards||[]).map(([provider,slug,name])=>`<div class="source-row">${esc(name)} · ${esc(provider)} <button data-action="remove-board" data-url="https://${{'Greenhouse':'job-boards.greenhouse.io','Lever':'jobs.lever.co','Ashby':'jobs.ashbyhq.com'}[provider]}/${esc(slug)}">Remove</button></div>`).join('')}

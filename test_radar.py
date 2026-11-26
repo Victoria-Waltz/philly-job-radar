@@ -37,6 +37,41 @@ class SearchTest(unittest.TestCase):
         self.assertTrue(radar.matches(job(title='Software Engineer, New Graduate'),new_grad,self.clock))
         self.assertFalse(radar.matches(job(title='Senior Software Engineer'),new_grad,self.clock))
 
+    def test_web_discovery_links_are_public_https_job_pages(self):
+        payload={'web':{'results':[
+            {'url':'https://example.org/careers/engineer','title':'Software Engineer'},
+            {'url':'https://example.net/photos','title':'Vacation photographs'},
+            {'url':'http://example.org/jobs','title':'Insecure jobs link'},
+            {'url':'https://user@example.org/jobs','title':'Jobs link with credentials'},
+        ]}}
+        self.assertEqual(list(radar.web_job_hits(payload)),[
+            {'url':'https://example.org/careers/engineer','title':'Software Engineer','domain':'example.org'}
+        ])
+
+    def test_remotive_attribution_and_cache(self):
+        payload={'jobs':[{'company_name':'Example','title':'Software Engineer','url':'https://remotive.com/remote-jobs/123',
+                          'candidate_required_location':'United States','publication_date':'2026-11-24T12:00:00'}]}
+        initial={'retry_after':0,'jobs':[],'error':None}
+        with patch.object(radar,'REMOTIVE_CACHE',initial), patch.object(radar,'fetch',return_value=payload) as fetch:
+            listing=radar.remotive({})[0]
+            self.assertEqual(listing['source'],'Remotive')
+            self.assertEqual(listing['work'],'Remote')
+            self.assertEqual(listing['link'],payload['jobs'][0]['url'])
+            self.assertEqual(radar.remotive({})[0],listing)
+            fetch.assert_called_once()
+
+    def test_usajobs_search_preserves_official_link_and_location(self):
+        row={'OrganizationName':'Example Agency','PositionTitle':'Software Engineer',
+             'PositionLocationDisplay':'Philadelphia, PA','PositionURI':'https://www.usajobs.gov/job/123',
+             'PositionID':'EXAMPLE-1','UserArea':{'Details':{'JobSummary':'Example'}}}
+        payload={'SearchResult':{'SearchResultItems':[{'MatchedObjectDescriptor':row}]}}
+        env={'USAJOBS_EMAIL':'example@example.org','USAJOBS_API_KEY':'example'}
+        with patch.dict(radar.os.environ,env), patch.object(radar,'fetch',return_value=payload) as fetch:
+            listing=radar.usajobs(dict(location='Philadelphia, PA',scope='50',any='software engineer'))[0]
+            self.assertEqual(listing['link'],row['PositionURI'])
+            self.assertEqual(listing['source'],'USAJOBS')
+            self.assertEqual(fetch.call_args.args[1]['Radius'],'50')
+
     def test_combined_filters(self):
         self.assertTrue(radar.matches(job(posted_at='2026-11-25'),self.filters,self.clock))
         for variant in (job(),job(posted_at='2026-11-10'),job(posted_at='2026-11-25',workplace='Remote'),
@@ -87,7 +122,8 @@ class SearchTest(unittest.TestCase):
             return [job(),job(req='102',link='https://jobs.ashbyhq.com/example/second')]
         with tempfile.TemporaryDirectory() as tmp, patch.object(radar,'DB',tmp+'/test.sqlite3'), \
              patch.object(radar,'BOARDS',[('Ashby','example','Example'),('Ashby','broken','Broken')]), \
-             patch.object(radar,'employer',side_effect=publisher), patch.object(radar,'PAGE_SIZE',1):
+             patch.object(radar,'employer',side_effect=publisher), patch.object(radar,'remotive',return_value=[]), \
+             patch.object(radar,'PAGE_SIZE',1):
             with radar.ThreadingHTTPServer(('127.0.0.1',0),radar.Handler) as server:
                 t=threading.Thread(target=server.serve_forever,daemon=True)
                 t.start()

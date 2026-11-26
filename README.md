@@ -16,10 +16,12 @@ The server creates `radar.sqlite3` alongside the code. Use `RADAR_DB` to choose 
 
 ## Sources
 
+- Remotive searches a cross-employer remote job board without a key. Listings link back to Remotive. The public feed is delayed by 24 hours and the app reuses successful results for six hours while running.
+- Set `USAJOBS_EMAIL` and `USAJOBS_API_KEY` to include federal jobs through the official USAJOBS search API. These listings are provided by USAJOBS. Philly Job Radar is unaffiliated with the U.S. Office of Personnel Management.
 - Key-free public ATS feeds ship for Stripe, Discord, Perpay and HealthVerity (Greenhouse), Ramp (Ashby), and Palantir and Gopuff (Lever). Philadelphia-area feeds also include FreedomPay, Veeva Systems, Trella Health, FORT Robotics, and Data Systems Analysts. Results cover the configured sources and are limited by what those sources return.
 - Use **Manage sources** to add a public Greenhouse, Ashby or Lever board URL. Custom careers sites and other ATS systems need their own adapters.
 - Set both `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` before starting the server to enable Adzuna's US search API. Results with an Adzuna redirect use the provider link.
-- Set `BRAVE_SEARCH_API_KEY` before starting the server to enable targeted Brave searches. The integration uses supported ATS hosts and verifies discovered URLs against the live job feed. It does not convert snippets into job records.
+- Set `BRAVE_SEARCH_API_KEY` to discover public job and career pages across the web. Matching listings from supported employer feeds become job cards. Other results appear as **Public web leads** from the last live search. Follow those links to verify details and availability. Dashboard filters apply to job cards. Coverage depends on what participating sources publish or index. Sign-in-only listings require access on their original sites.
 - Settings are process environment variables and never sent to the browser. On PowerShell, for example, use `$env:BRAVE_SEARCH_API_KEY = "your-key"` before `py radar.py`.
 
 ## Freshness and coverage
@@ -34,6 +36,6 @@ Radius sorting and filtering use a bundled Philadelphia-area city and ZIP lookup
 python -m unittest -v
 ```
 
-The automated suite covers combined filters, date precision, Pennsylvania eligibility, required versus preferred experience, employer-link deduplication, partial failures and SQLite persistence via HTTP. The first live search returned posts from Stripe, Discord, Ramp and Palantir. Original Stripe and Discord listing URLs returned HTTP 200. Ramp and Palantir returned HTTP 403 on the sampled listing pages from this environment, although their feed requests succeeded. Adzuna and Brave require credentials for live verification.
+The automated suite covers combined filters, date precision, Pennsylvania eligibility, required versus preferred experience, employer-link deduplication, partial failures and SQLite persistence via HTTP. The first live search returned posts from Stripe, Discord, Ramp and Palantir. Original Stripe and Discord listing URLs returned HTTP 200. Ramp and Palantir returned HTTP 403 on the sampled listing pages from this environment, although their feed requests succeeded. Adzuna, Brave Search, and USAJOBS require credentials for live verification.
 
 A subsequent unrestricted Chromium desktop search retrieved 2,067 distinct postings across all seven bundled boards. Chromium at desktop size and with iPhone 13 emulation completed the search, details, save, and status update flow. The saved status survived reload. The phone check used browser emulation. The combined filters and remote eligibility checks use controlled fixtures because live listings can change.

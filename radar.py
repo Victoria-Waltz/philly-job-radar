@@ -7,6 +7,7 @@ import os
 import re
 import sqlite3
 import time
+from threading import Lock
 import urllib.error
 import urllib.parse as url
 import urllib.request as request
@@ -38,6 +39,8 @@ ROLE_QUERIES = ('software developer', 'data analyst', 'IT support', 'technology 
 DEFAULT = dict(roles=list(ROLE_PATTERNS), location='Philadelphia, PA', scope='50',
                national_remote=True, state='PA', unknown_date=True, date='any', sort='Best Match')
 PAGE_SIZE = 50
+REMOTIVE_LOCK = Lock()
+REMOTIVE_CACHE = {'retry_after':0, 'jobs':[], 'error':None}
 SKILLS = ['Python','Java','JavaScript','SQL','Git','Power BI','automation','project coordination']
 HOSTS = {'job-boards.greenhouse.io':'Greenhouse','boards.greenhouse.io':'Greenhouse',
          'jobs.lever.co':'Lever','jobs.ashbyhq.com':'Ashby'}
@@ -226,14 +229,89 @@ def adzuna(filters):
                     break
     return found
 
+def remotive(_filters):
+    with REMOTIVE_LOCK:
+        current=time.monotonic()
+        if current < REMOTIVE_CACHE['retry_after']:
+            if REMOTIVE_CACHE['error']:
+                raise RuntimeError(REMOTIVE_CACHE['error'])
+            return REMOTIVE_CACHE['jobs']
+        try:
+            rows=fetch('https://remotive.com/api/remote-jobs')['jobs']
+        except (RuntimeError,ValueError,KeyError) as exc:
+            REMOTIVE_CACHE.update(retry_after=time.monotonic()+900,error='Remote listings temporarily unavailable')
+            raise RuntimeError(REMOTIVE_CACHE['error']) from exc
+        jobs=[]
+        checked_at=now()
+        for row in rows:
+            region=row.get('candidate_required_location') or 'Remote · Location eligibility unspecified'
+            item=normalize('Remotive',row['company_name'],row['title'],region,row.get('description'),row['url'],
+                           workplace='Remote',employment=row.get('job_type'),posted_at=(row.get('publication_date') or '')[:10],
+                           industry=row.get('category',''),salary=row.get('salary') or None,employer=False,
+                           checked_at=checked_at)
+            if row.get('candidate_required_location'):
+                item['restriction']='Eligible location: '+region
+            jobs.append(item)
+        REMOTIVE_CACHE.update(retry_after=time.monotonic()+21600,jobs=jobs,error=None)
+        return jobs
+
+def usajobs(filters):
+    headers={'User-Agent':os.environ['USAJOBS_EMAIL'],'Authorization-Key':os.environ['USAJOBS_API_KEY']}
+    jobs=[]
+    keywords=terms(filters.get('any'))[:6] or ROLE_QUERIES
+    places=locations(filters)[:2] if filters.get('scope')!='nationwide' else ['']
+    queries=[(keyword,place,False) for place in (places or ['']) for keyword in keywords]
+    if filters.get('national_remote') and any(places):
+        queries.extend((keyword,'',True) for keyword in keywords)
+    for keyword,place,remote in queries:
+        params={'Keyword':keyword,'LocationName':place,'ResultsPerPage':50,'HiringPath':'public;graduates'}
+        if place and filters.get('scope','').isdigit():
+            params['Radius']=filters['scope']
+        if remote:
+            params['RemoteIndicator']='True'
+        response=fetch('https://data.usajobs.gov/api/Search',params,headers)
+        for result in response['SearchResult']['SearchResultItems']:
+            row=result['MatchedObjectDescriptor']
+            details=(row.get('UserArea') or {}).get('Details') or {}
+            apply=(row.get('ApplyURI') or [None])[0]
+            jobs.append(normalize('USAJOBS',row['OrganizationName'],row['PositionTitle'],row.get('PositionLocationDisplay'),
+                        details.get('JobSummary'),row['PositionURI'],posted_at=row.get('PublicationStartDate'),
+                        expires_at=row.get('ApplicationCloseDate'),apply=apply,employer=True,
+                        workplace='Remote' if remote or details.get('RemoteIndicator') is True else '',
+                        req=str(row.get('PositionID') or '')))
+    return jobs
+
+def web_job_hits(payload):
+    for hit in (payload.get('web') or {}).get('results',[]):
+        link=hit.get('url','')
+        try:
+            parsed=url.urlsplit(link)
+        except ValueError:
+            continue
+        if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password:
+            continue
+        title=clean(hit.get('title',''))
+        if not title or not re.search(r'\b(?:jobs?|careers?|vacanc(?:y|ies)|hiring|apply|workday|recruiting)\b',
+                                       f'{title} {parsed.hostname} {parsed.path} {parsed.query}',re.I):
+            continue
+        yield dict(url=link,title=title,domain=parsed.hostname)
+
 def discovery(filters):
     boards={}
+    web_links={}
     career='new graduate' if filters.get('experience')==['New Grad'] else ''
+    places=[] if filters.get('scope')=='nationwide' else locations(filters)[:2]
+    location=' OR '.join(f'"{place}"' for place in places)
+    work=' OR '.join(label for label in filters.get('work',[]) if label!='Unspecified')
+    if filters.get('national_remote') and places:
+        location=f'({location} OR "US remote")'
+    elif len(places)>1:
+        location=f'({location})'
     for keyword in terms(filters.get('any'))[:6] or ROLE_QUERIES:
-        place='' if filters.get('scope')=='nationwide' else ' '.join(locations(filters)[:2])
-        query=f'"{keyword}" {place} {" ".join(filters.get("work",[]))} {career} (site:job-boards.greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com)'
+        query=f'"{keyword[:140]}" {location[:200]} {work} {career} job openings'
         result=fetch('https://api.search.brave.com/res/v1/web/search',{'q':query,'count':15},{'X-Subscription-Token':os.environ['BRAVE_SEARCH_API_KEY']})
-        for hit in result.get('web',{}).get('results',[]):
+        for hit in web_job_hits(result):
+            web_links.setdefault(hit['url'],hit)
             try:
                 board=board_url(hit['url'])
             except ValueError:
@@ -247,7 +325,9 @@ def discovery(filters):
                 output.extend(r for r in future.result() if canonical(r['link']) in futures[future])
             except (RuntimeError,ValueError,KeyError):
                 continue
-    return output
+    verified={canonical(item['link']) for item in output}
+    links=[hit for hit in web_links.values() if canonical(hit['url']) not in verified]
+    return output,links[:40]
 
 def company_key(value):
     return re.sub(r'\W','',value.lower())
@@ -278,7 +358,7 @@ def merge(prior, incoming, stamp):
             for field in ('posted_at','precision','posting_source'):
                 combined[field]=incoming_job.get(field) or old.get(field)
         keys |= set(old.get('aliases',[]))
-        combined.update(id=jid,aliases=sorted(keys),first_seen_at=old.get('first_seen_at',stamp),last_checked_at=stamp,
+        combined.update(id=jid,aliases=sorted(keys),first_seen_at=old.get('first_seen_at',stamp),last_checked_at=incoming_job.get('checked_at',stamp),
                         availability='Open',sources=sorted(set(old.get('sources',[])+[incoming_job['source']])))
         all_jobs[jid]=combined
         index.update(dict.fromkeys(keys,jid))
@@ -413,7 +493,9 @@ def results(conn, filters):
 
 def refresh(filters, custom, previous):
     sources={f'{b[0]} · {b[2]}':(employer,b) for b in BOARDS+[tuple(b) for b in custom]}
-    optional={'Adzuna':(adzuna,bool(os.getenv('ADZUNA_APP_ID') and os.getenv('ADZUNA_APP_KEY'))),
+    sources['Remotive']=(remotive,filters)
+    optional={'USAJOBS':(usajobs,bool(os.getenv('USAJOBS_EMAIL') and os.getenv('USAJOBS_API_KEY'))),
+              'Adzuna':(adzuna,bool(os.getenv('ADZUNA_APP_ID') and os.getenv('ADZUNA_APP_KEY'))),
               'Brave Search':(discovery,bool(os.getenv('BRAVE_SEARCH_API_KEY')))}
     status={name:{'state':'awaiting credentials'} for name,(_,ready) in optional.items() if not ready}
     sources.update({name:(fn,filters) for name,(fn,ready) in optional.items() if ready})
@@ -428,8 +510,13 @@ def refresh(filters, custom, previous):
                 status[name]={'state':'unavailable','last_success':previous.get(name,{}).get('last_success'),
                               'detail':str(exc) if isinstance(exc,RuntimeError) else 'Unexpected feed response'}
             else:
+                links=[]
+                if name=='Brave Search':
+                    jobs,links=jobs
                 incoming.extend(jobs)
                 status[name]={'state':'searched','last_success':now(),'count':len(jobs)}
+                if links:
+                    status[name]['web_links']=links
     return status,incoming
 
 def snapshot(conn):
@@ -440,6 +527,8 @@ def snapshot(conn):
         item['new']=sum(j['first_seen_at']>(item.get('viewed') or '') for j in results(conn,item['filters']))
     boards=get(conn,'boards',[])
     statuses={f'{provider} · {name}':{'state':'configured'} for provider,_,name in BOARDS+[tuple(b) for b in boards]}
+    statuses['Remotive']={'state':'configured'}
+    statuses['USAJOBS']={'state':'configured' if os.getenv('USAJOBS_EMAIL') and os.getenv('USAJOBS_API_KEY') else 'awaiting credentials'}
     statuses['Adzuna']={'state':'configured' if os.getenv('ADZUNA_APP_ID') and os.getenv('ADZUNA_APP_KEY') else 'awaiting credentials'}
     statuses['Brave Search']={'state':'configured' if os.getenv('BRAVE_SEARCH_API_KEY') else 'awaiting credentials'}
     statuses.update({name:status for name,status in get(conn,'sources',{}).items() if name in statuses})
