@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Philly Job Radar</title><link rel="stylesheet" href="/style.css"><script defer src="/app.js"></script></head>
+<body>
+<header class="top"><div class="top-inner"><a href="#" class="brand" aria-label="Philly Job Radar home"><span class="radar" aria-hidden="true">◔</span> Philly Job Radar</a>
+<nav aria-label="Dashboard"><button data-tab="search" class="active">Search Jobs</button><button data-tab="searches">Saved Searches</button><button data-tab="saved">Saved Jobs</button><button data-tab="applications">Applications</button></nav></div></header>
+<main>
+<section id="search">
+<div class="title-row"><h1>Find your next job</h1><button class="plain" id="sources-button">Manage sources</button></div>
+<form id="search-form"><div class="search-bar"><label class="keyword"><span aria-hidden="true">⌕</span><input name="any" aria-label="Any job title or keyword" placeholder="Job titles or keywords"></label><label><span aria-hidden="true">♧</span><input name="location" aria-label="Location" placeholder="City, state or ZIP"></label><button class="primary" id="refresh">Search live jobs</button></div>
+<div class="filter-strip"><button type="button" id="open-filters" class="mobile-only">Filters</button><div id="chips"></div><button type="button" class="plain" id="clear">Clear all</button><button type="button" id="save-search">Save search</button></div>
+<div class="layout"><aside id="filter-panel" aria-label="Search filters"><div class="filter-heading"><h2>Filters</h2><button type="button" id="close-filters" class="mobile-only">Done</button></div><div id="basic"></div><details><summary>Advanced filters</summary><div id="advanced"></div></details></aside>
+<div class="results"><div class="results-head"><div><h2>Search results</h2><span id="count" class="pill" aria-live="polite">0 matches</span></div><label class="sort"><span>Sort</span><select name="sort" aria-label="Sort results"></select></label></div>
+<div id="notice" class="notice" role="status"></div><div id="cards"></div></div></div>
+</form>
+</section>
+<section id="searches" hidden><h1>Saved searches</h1><div id="search-list"></div></section>
+<section id="saved" hidden><h1>Saved jobs</h1><div id="saved-list"></div></section>
+<section id="applications" hidden><h1>Applications</h1><div id="application-list"></div></section>
+</main>
+<dialog id="dialog"><div class="dialog-head"><h2 id="dialog-title"></h2><button id="close-dialog" aria-label="Close">×</button></div><div id="dialog-body"></div></dialog>
+<div id="toast" role="status" hidden></div>
+</body></html>
